@@ -9,7 +9,7 @@
 
 ## 配置
 
-插件安装后，在主界面的“插件 → 已安装”中打开本插件，再点击 `local-openai-image-tools` 行的“配置”进入参数表单：
+插件安装后，在主界面的“插件 → 已安装”中打开本插件，再点击 `dsh-openai-image-tools` 行的“配置”进入参数表单：
 
 - `baseURL`：默认 `https://api.openai.com/v1`
 - `apiKey`：Bearer API Key（Secret 字段；可信本地服务可留空）

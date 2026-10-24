@@ -153,7 +153,7 @@ window.__ModuleLoader__.load({
         ctx.effect(() => ctx.locale.register(NS, dictionaries))
         ctx.slots.inject('plugins.row.config', () => ctx.slots.register({
           name: 'plugins.row.config',
-          key: '@ayui124/dsh-openai-image-tools#local-openai-image-tools',
+          key: '@ayui124/dsh-openai-image-tools#dsh-openai-image-tools',
           locale: NS,
         }, ImageToolsConfig))
       },

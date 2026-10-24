@@ -1,0 +1,4 @@
+- insert:
+    - id: local-openai-image-tools
+      name: '@ayui124/dsh-openai-image-tools'
+      config: {}

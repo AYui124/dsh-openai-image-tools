@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "OpenAI 图片生成工具",
+    "description": "提供可配置的 OpenAI 兼容文生图与图生图 Agent 工具。"
+  }
+}

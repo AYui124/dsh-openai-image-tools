@@ -35,7 +35,7 @@
 - Workflow 文件：`publish.yml`
 - Environment：留空
 
-创建并发布 GitHub Release 时，Release Tag 必须与 `package.json` 版本一致，例如 `v1.0.7`。工作流会验证版本、安装依赖、运行检查与测试，然后将 scoped package 公开发布到 npm。
+创建并发布 GitHub Release 时，Release Tag 必须与 `package.json` 版本一致，例如 `v1.0.8`。工作流会验证版本、安装依赖、运行检查与测试，然后将 scoped package 公开发布到 npm。
 
 ## License
 

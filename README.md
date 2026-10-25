@@ -25,3 +25,18 @@
 默认严格使用 OpenAI Images API：文生图发送 JSON，图生图发送 multipart。响应同时支持 `b64_json` 与临时 `url`。URL 结果会立即下载并转存为持久附件。
 
 图生图输入使用 `image_paths`，路径按当前 Session 工作目录解析；可选 `mask_path` 必须是 PNG。插件不会在 400 响应后自动切换 multipart 字段或重试，以避免重复生成和计费。
+
+## npm 发布
+
+仓库使用 [npm Trusted Publisher](https://docs.npmjs.com/trusted-publishers) 和 GitHub Actions OIDC 发布，不保存 `NPM_TOKEN`。在 npm 包设置中配置：
+
+- GitHub 用户或组织：`AYui124`
+- 仓库：`dsh-openai-image-tools`
+- Workflow 文件：`publish.yml`
+- Environment：留空
+
+创建并发布 GitHub Release 时，Release Tag 必须与 `package.json` 版本一致，例如 `v1.0.7`。工作流会验证版本、安装依赖、运行检查与测试，然后将 scoped package 公开发布到 npm。
+
+## License
+
+[MIT](./LICENSE) © 2026 AYui124

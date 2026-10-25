@@ -1,8 +1,30 @@
 {
   "name": "@ayui124/dsh-openai-image-tools",
-  "version": "1.0.6",
-  "private": true,
+  "version": "1.0.7",
   "description": "OpenAI-compatible text-to-image and image-to-image tools for DeepSeek Harness",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "cordis",
+    "openai",
+    "image-generation",
+    "text-to-image",
+    "image-to-image",
+    "agent-tools"
+  ],
+  "homepage": "https://github.com/AYui124/dsh-openai-image-tools#readme",
+  "bugs": {
+    "url": "https://github.com/AYui124/dsh-openai-image-tools/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AYui124/dsh-openai-image-tools.git"
+  },
+  "author": {
+    "name": "AYui124",
+    "url": "https://github.com/AYui124"
+  },
+  "license": "MIT",
   "type": "module",
   "exports": {
     ".": "./index.js",
@@ -17,10 +39,22 @@
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
-    "test": "node --test"
+    "check": "node --check index.js && node --check api.js && node --check client.js",
+    "test": "node --test",
+    "prepack": "npm run check && npm test"
+  },
+  "engines": {
+    "node": ">=22.14.0",
+    "dsh": ">=0.2.1-rc.2 <0.3.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "registry": "https://registry.npmjs.org/"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "~3.18.5"
@@ -32,7 +66,9 @@
     "client": {
       "platform": "web",
       "immediately": true,
-      "inject": ["@deepseek-ai/dsh-client-ui-plugin-manager"]
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
+      ]
     }
   }
 }

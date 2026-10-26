@@ -7,7 +7,7 @@
 - `generate_image_async`：创建 DSH 后台文生图 Job 并立即返回 Job ID。
 - `edit_image_async`：创建 DSH 后台图生图 Job 并立即返回 Job ID。
 
-同步结果会直接作为图片内容块返回。异步结果会保存到 Harness 附件存储，并在 Job 结束后向发起任务的原会话追加图片；任务可通过内置的 `job_list`、`job_output` 和 `job_kill` 查看或取消。
+同步结果会直接作为图片内容块返回。异步结果会保存到 Harness 附件存储，并在 Job 结束后以可见消息向发起任务的原会话追加图片，无需先复制到工作区；任务可通过内置的 `job_list`、`job_output` 和 `job_kill` 查看或取消。
 
 四个 ToolDefinition 携带非模型字段 `snowlumaCapability`，由插件自身声明中文名称、用途、插件包来源和风险。SnowLuma 等能力目录可在运行时动态读取这些 metadata；这不会改变模型看到的 tool schema，也不要求能力目录硬编码本插件或工具名。
 
@@ -39,7 +39,7 @@
 - Workflow 文件：`publish.yml`
 - Environment：留空
 
-创建并发布 GitHub Release 时，Release Tag 必须与 `package.json` 版本一致，例如 `v1.1.1`。工作流会验证版本、安装依赖、运行检查与测试，然后将 scoped package 公开发布到 npm。
+创建并发布 GitHub Release 时，Release Tag 必须与 `package.json` 版本一致，例如 `v1.1.2`。工作流会验证版本、安装依赖、运行检查与测试，然后将 scoped package 公开发布到 npm。
 
 ## License
 

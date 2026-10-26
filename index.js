@@ -284,20 +284,12 @@ function backgroundMessage(jobId, label, settled) {
         { type: 'text', text: `Background image job ${jobId} (${label}) completed.` },
         ...renderImages(undefined, settled.value).slice(1),
       ],
-      source: {
-        kind: 'openai-image-tools',
-        form: 'background-result',
-        summary: `Image job ${jobId} completed`,
-      },
+      source: { kind: 'user' },
     })
   }
   return createUserMessage({
     content: [{ type: 'text', text: `Background image job ${jobId} (${label}) failed: ${errorText(settled.error)}` }],
-    source: {
-      kind: 'openai-image-tools',
-      form: 'background-result',
-      summary: `Image job ${jobId} failed`,
-    },
+    source: { kind: 'user' },
   })
 }
 

@@ -177,7 +177,9 @@ test('starts an async image job immediately and appends its image to the origina
     assert.equal(followups.length, 1)
     assert.equal(injections.length, 0)
     assert.equal(followups[0].role, 'user')
+    assert.deepEqual(followups[0].source, { kind: 'user' })
     assert.equal(followups[0].content[1].type, 'image')
+    assert.match(followups[0].content[1].attachment.attachmentId, /^sha256:/u)
     assert.match(outcome.result, /sha256:/u)
   } finally {
     globalThis.fetch = originalFetch
@@ -196,6 +198,7 @@ test('reports async provider failures back to the originating conversation', { c
     assert.equal(outcome.status, 'failed')
     assert.match(outcome.detail, /HTTP 504/u)
     assert.equal(followups.length, 1)
+    assert.deepEqual(followups[0].source, { kind: 'user' })
     assert.match(followups[0].content[0].text, /failed.*HTTP 504/u)
   } finally {
     globalThis.fetch = originalFetch

@@ -1,11 +1,15 @@
 # OpenAI Image Tools
 
-为 DeepSeek Harness 提供两个模型工具：
+为 DeepSeek Harness 提供同步与异步图片工具：
 
-- `generate_image`：调用 OpenAI 兼容的 `/images/generations` 文生图接口。
-- `edit_image`：读取工作区图片，以 multipart/form-data 调用 `/images/edits` 图生图/编辑接口。
+- `generate_image`：同步调用 OpenAI 兼容的 `/images/generations` 文生图接口。
+- `edit_image`：同步读取工作区图片，以 multipart/form-data 调用 `/images/edits` 图生图/编辑接口。
+- `generate_image_async`：创建 DSH 后台文生图 Job 并立即返回 Job ID。
+- `edit_image_async`：创建 DSH 后台图生图 Job 并立即返回 Job ID。
 
-生成结果会保存到 Harness 附件存储，并作为图片内容块直接返回给 Agent。
+同步结果会直接作为图片内容块返回。异步结果会保存到 Harness 附件存储，并在 Job 结束后向发起任务的原会话追加图片；任务可通过内置的 `job_list`、`job_output` 和 `job_kill` 查看或取消。
+
+四个 ToolDefinition 携带非模型字段 `snowlumaCapability`，由插件自身声明中文名称、用途、插件包来源和风险。SnowLuma 等能力目录可在运行时动态读取这些 metadata；这不会改变模型看到的 tool schema，也不要求能力目录硬编码本插件或工具名。
 
 ## 配置
 
@@ -35,7 +39,7 @@
 - Workflow 文件：`publish.yml`
 - Environment：留空
 
-创建并发布 GitHub Release 时，Release Tag 必须与 `package.json` 版本一致，例如 `v1.0.8`。工作流会验证版本、安装依赖、运行检查与测试，然后将 scoped package 公开发布到 npm。
+创建并发布 GitHub Release 时，Release Tag 必须与 `package.json` 版本一致，例如 `v1.1.1`。工作流会验证版本、安装依赖、运行检查与测试，然后将 scoped package 公开发布到 npm。
 
 ## License
 

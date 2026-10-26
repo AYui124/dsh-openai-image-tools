@@ -1,6 +1,6 @@
 {
   "name": "@ayui124/dsh-openai-image-tools",
-  "version": "1.0.8",
+  "version": "1.1.1",
   "description": "OpenAI-compatible text-to-image and image-to-image tools for DeepSeek Harness",
   "keywords": [
     "deepseek-harness",

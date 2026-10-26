@@ -1,12 +1,21 @@
 import z from '@deepseek-ai/schemastery'
+import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
 import { endpointURL, optionalImageFields, parseImageAPIResponse, sniffImageMediaType } from './api.js'
 
 export const name = 'openai-image-tools'
-export const inject = ['tools', 'attachments', 'fs', 'workingDirectory']
+export const inject = ['tools', 'attachments', 'fs', 'workingDirectory', 'jobs', 'agents']
 
 const MAX_TIMER_MS = 2_147_483_647
 const enumSchema = values => z.union(values.map(value => z.const(value)))
+const deepFreeze = value => {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) deepFreeze(child)
+    Object.freeze(value)
+  }
+  return value
+}
+const createUserMessage = input => deepFreeze(structuredClone({ ...input, role: 'user', id: randomUUID() }))
 
 export const Config = z.object({
   baseURL: z.string().default('https://api.openai.com/v1').volatile().description('OpenAI-compatible API root URL, not a complete image endpoint.'),
@@ -70,6 +79,28 @@ function toolOutput() {
   return { schema: OUTPUT_SCHEMA, render: renderImages }
 }
 
+const ASYNC_OUTPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    job_id: { type: 'string' },
+    status: { type: 'string', enum: ['running'] },
+  },
+  required: ['job_id', 'status'],
+}
+
+function asyncToolOutput() {
+  return {
+    schema: ASYNC_OUTPUT_SCHEMA,
+    render(_args, value) {
+      return [{
+        type: 'text',
+        text: `Started background image job ${value.job_id}. The generated image will be appended to this conversation when the job finishes.`,
+      }]
+    },
+  }
+}
+
 function assertCommonArgs(args, config) {
   if (typeof args.prompt !== 'string' || args.prompt.trim().length === 0) throw new Error('prompt must be a non-empty string')
   if (args.n !== undefined && (!Number.isInteger(args.n) || args.n < 1 || args.n > config.maxImages)) throw new Error(`n must be an integer from 1 to ${config.maxImages}`)
@@ -122,15 +153,18 @@ async function saveOutputs(ctx, outputs) {
   }
 }
 
-async function parseAndSave(ctx, response, config, exec) {
+async function parseAndSave(ctx, response, config, signal) {
   const outputs = await parseImageAPIResponse(response, {
     fetchImpl: fetch,
-    signal: requestSignal(exec.signal, config.downloadTimeoutMs),
+    signal: requestSignal(signal, config.downloadTimeoutMs),
     maxOutputImageBytes: config.maxOutputImageBytes,
     maxImages: config.maxImages,
     allowPrivateImageUrls: config.allowPrivateImageUrls,
   })
-  return saveOutputs(ctx, outputs)
+  if (signal.aborted) throw signal.reason
+  const saved = await saveOutputs(ctx, outputs)
+  if (signal.aborted) throw signal.reason
+  return saved
 }
 
 function commonProperties(maxImages) {
@@ -155,6 +189,15 @@ function registerGenerateTool(ctx, config) {
   ctx.tools.register({
     name: 'generate_image',
     description: 'Generate images from a text prompt through the configured OpenAI-compatible Images API. The generated images are returned as durable image attachments.',
+    snowlumaCapability: {
+      label: '生成图片',
+      description: '根据文字描述生成图片。',
+      sourceKind: 'plugin',
+      sourceLabel: '插件 dsh-openai-image-tools',
+      sourcePackage: '@ayui124/dsh-openai-image-tools',
+      risk: 'medium',
+      riskReason: '会调用可能计费的图片服务；QQ 每次只投递一张结果图片。',
+    },
     parameters: { type: 'object', additionalProperties: false, properties: commonProperties(config.maxImages), required: ['prompt'] },
     output: toolOutput(),
     timeoutMs: config.timeoutMs,
@@ -169,7 +212,7 @@ function registerGenerateTool(ctx, config) {
         body: JSON.stringify(body),
         signal: requestSignal(exec.signal, config.timeoutMs),
       })
-      return parseAndSave(ctx, response, config, exec)
+      return parseAndSave(ctx, response, config, exec.signal)
     },
     presentCall(args) {
       return { card: 'generic', title: `Generate image: ${args.prompt}`, kind: 'other', rawInput: args }
@@ -181,6 +224,15 @@ function registerEditTool(ctx, config) {
   ctx.tools.register({
     name: 'edit_image',
     description: 'Create or edit an image from one or more workspace image files through the configured OpenAI-compatible Images Edit API. Use image_paths in reference order; an optional PNG mask controls the editable area.',
+    snowlumaCapability: {
+      label: '编辑图片',
+      description: '编辑工作区中的图片。',
+      sourceKind: 'plugin',
+      sourceLabel: '插件 dsh-openai-image-tools',
+      sourcePackage: '@ayui124/dsh-openai-image-tools',
+      risk: 'high',
+      riskReason: '会读取选定的工作区图片，并调用可能计费的图片服务。',
+    },
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -213,10 +265,188 @@ function registerEditTool(ctx, config) {
         body: form,
         signal: requestSignal(exec.signal, config.timeoutMs),
       })
-      return parseAndSave(ctx, response, config, exec)
+      return parseAndSave(ctx, response, config, exec.signal)
     },
     presentCall(args) {
       return { card: 'generic', title: `Edit image: ${args.prompt}`, kind: 'other', rawInput: { prompt: args.prompt, image_paths: args.image_paths, mask_path: args.mask_path } }
+    },
+  })
+}
+
+function errorText(error) {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function backgroundMessage(jobId, label, settled) {
+  if (settled.value !== undefined) {
+    return createUserMessage({
+      content: [
+        { type: 'text', text: `Background image job ${jobId} (${label}) completed.` },
+        ...renderImages(undefined, settled.value).slice(1),
+      ],
+      source: {
+        kind: 'openai-image-tools',
+        form: 'background-result',
+        summary: `Image job ${jobId} completed`,
+      },
+    })
+  }
+  return createUserMessage({
+    content: [{ type: 'text', text: `Background image job ${jobId} (${label}) failed: ${errorText(settled.error)}` }],
+    source: {
+      kind: 'openai-image-tools',
+      form: 'background-result',
+      summary: `Image job ${jobId} failed`,
+    },
+  })
+}
+
+function deliverBackgroundResult(ctx, originAgent, jobId, label, settled) {
+  const owner = ctx.agents.get(originAgent.id)
+  if (owner !== originAgent) return
+  const message = backgroundMessage(jobId, label, settled)
+  if (owner.status === 'idle') owner.followup(message)
+  else owner.inject(message)
+}
+
+function startBackgroundImageJob(ctx, exec, label, operation) {
+  if (exec.agent === undefined) throw new Error('Background image generation requires an owning Agent session.')
+  const originAgent = exec.agent
+  const ownerId = originAgent.id
+  const controller = new AbortController()
+  let task
+  const jobId = ctx.jobs.start({
+    kind: 'image',
+    label,
+    owner: ownerId,
+    toolCall: { callId: exec.callId, rootCallId: exec.rootCallId ?? exec.callId },
+    outputLimitBytes: 8 * 1024,
+    run(job) {
+      job.updateProgress('waiting for image provider')
+      task = Promise.resolve().then(() => operation(controller.signal, job)).then(value => ({
+        value,
+        outcome: {
+          status: 'completed',
+          result: JSON.stringify({
+            message: `Generated ${value.images.length} image${value.images.length === 1 ? '' : 's'}; automatic delivery to the originating conversation was scheduled.`,
+            images: value.images.map(image => imageRef(image)),
+          }),
+        },
+      }), error => ({
+        error,
+        outcome: controller.signal.aborted
+          ? { status: 'killed', detail: errorText(controller.signal.reason ?? error) }
+          : { status: 'failed', detail: errorText(error) },
+      }))
+      return {
+        cancel(reason) {
+          if (!controller.signal.aborted) controller.abort(new Error(reason || 'background image job cancelled'))
+        },
+        done: task.then(settled => settled.outcome),
+      }
+    },
+  })
+  void ctx.jobs.wait(jobId, MAX_TIMER_MS, ownerId).then(async job => {
+    const settled = await task
+    if (job.status === 'completed' || job.status === 'failed') deliverBackgroundResult(ctx, originAgent, jobId, label, settled)
+  }).catch(error => {
+    ctx.logger?.warn?.(`background image job ${jobId} delivery failed: ${errorText(error)}`)
+  })
+  return { job_id: jobId, status: 'running' }
+}
+
+function registerAsyncGenerateTool(ctx, config) {
+  ctx.tools.register({
+    name: 'generate_image_async',
+    description: 'Start text-to-image generation as a background job and return immediately. The completed images are appended to the originating conversation. Use job_list, job_output, or job_kill with the returned job id when needed.',
+    snowlumaCapability: {
+      label: '异步生成图片',
+      description: '在后台根据文字描述生成图片，完成后追加到原会话。',
+      sourceKind: 'plugin',
+      sourceLabel: '插件 dsh-openai-image-tools',
+      sourcePackage: '@ayui124/dsh-openai-image-tools',
+      risk: 'medium',
+      riskReason: '会在后台调用可能计费的图片服务，并在完成后向原会话投递图片。',
+    },
+    parameters: { type: 'object', additionalProperties: false, properties: commonProperties(config.maxImages), required: ['prompt'] },
+    output: asyncToolOutput(),
+    isConcurrencySafe: () => true,
+    timeoutMs: 30_000,
+    async execute(args, exec) {
+      const snapshot = resolveConfig(config)
+      assertCommonArgs(args, snapshot)
+      const body = { model: args.model?.trim() || snapshot.model, prompt: args.prompt, ...optionalImageFields(args) }
+      setResponseFormat(snapshot, body)
+      return startBackgroundImageJob(ctx, exec, `Generate image: ${args.prompt}`, async (signal, job) => {
+        const response = await fetch(endpointURL(snapshot.baseURL, snapshot.generationPath), {
+          method: 'POST',
+          headers: requestHeaders(snapshot, true),
+          body: JSON.stringify(body),
+          signal: requestSignal(signal, snapshot.timeoutMs),
+        })
+        job.updateProgress('saving generated images')
+        return parseAndSave(ctx, response, snapshot, signal)
+      })
+    },
+    presentCall(args) {
+      return { card: 'generic', title: `Generate image in background: ${args.prompt}`, kind: 'other', rawInput: args }
+    },
+  })
+}
+
+function registerAsyncEditTool(ctx, config) {
+  ctx.tools.register({
+    name: 'edit_image_async',
+    description: 'Start an image edit from workspace files as a background job and return immediately. The completed images are appended to the originating conversation. Use job_list, job_output, or job_kill with the returned job id when needed.',
+    snowlumaCapability: {
+      label: '异步编辑图片',
+      description: '在后台编辑工作区图片，完成后追加到原会话。',
+      sourceKind: 'plugin',
+      sourceLabel: '插件 dsh-openai-image-tools',
+      sourcePackage: '@ayui124/dsh-openai-image-tools',
+      risk: 'high',
+      riskReason: '会读取选定的工作区图片，在后台调用可能计费的服务，并向原会话投递图片。',
+    },
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        ...commonProperties(config.maxImages),
+        image_paths: { type: 'array', items: { type: 'string' }, description: `One to ${config.maxImages} workspace image paths. Their order is preserved.` },
+        mask_path: { type: 'string', description: 'Optional workspace path to a PNG mask.' },
+      },
+      required: ['prompt', 'image_paths'],
+    },
+    output: asyncToolOutput(),
+    isConcurrencySafe: () => true,
+    timeoutMs: 30_000,
+    async execute(args, exec) {
+      const snapshot = resolveConfig(config)
+      assertCommonArgs(args, snapshot)
+      if (!Array.isArray(args.image_paths) || args.image_paths.length < 1 || args.image_paths.length > snapshot.maxImages) throw new Error(`image_paths must contain from 1 to ${snapshot.maxImages} paths`)
+      const images = []
+      for (const path of args.image_paths) images.push(await loadWorkspaceImage(ctx, path, exec, snapshot.maxInputImageBytes))
+      const mask = args.mask_path === undefined ? undefined : await loadWorkspaceImage(ctx, args.mask_path, exec, snapshot.maxInputImageBytes, true)
+      return startBackgroundImageJob(ctx, exec, `Edit image: ${args.prompt}`, async (signal, job) => {
+        const form = new FormData()
+        form.set('model', args.model?.trim() || snapshot.model)
+        form.set('prompt', args.prompt)
+        for (const [key, value] of Object.entries(optionalImageFields(args))) form.set(key, String(value))
+        setResponseFormat(snapshot, form)
+        for (const image of images) form.append(snapshot.imageField, new Blob([image.data], { type: image.mediaType }), image.filename)
+        if (mask !== undefined) form.set('mask', new Blob([mask.data], { type: mask.mediaType }), mask.filename)
+        const response = await fetch(endpointURL(snapshot.baseURL, snapshot.editPath), {
+          method: 'POST',
+          headers: requestHeaders(snapshot, false),
+          body: form,
+          signal: requestSignal(signal, snapshot.timeoutMs),
+        })
+        job.updateProgress('saving edited images')
+        return parseAndSave(ctx, response, snapshot, signal)
+      })
+    },
+    presentCall(args) {
+      return { card: 'generic', title: `Edit image in background: ${args.prompt}`, kind: 'other', rawInput: { prompt: args.prompt, image_paths: args.image_paths, mask_path: args.mask_path } }
     },
   })
 }
@@ -263,4 +493,6 @@ export function apply(ctx, config) {
   })
   registerGenerateTool(ctx, current)
   registerEditTool(ctx, current)
+  registerAsyncGenerateTool(ctx, current)
+  registerAsyncEditTool(ctx, current)
 }

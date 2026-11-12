@@ -11,7 +11,7 @@ const encodedPng = Buffer.from(tinyPng).toString('base64')
 function config(overrides = {}) {
   return {
     baseURL: 'https://images.example/v1',
-    apiKey: 'secret-key',
+    apiKeyEnv: 'OPENAI_IMAGE_API_KEY',
     model: 'test-image-model',
     generationPath: '/images/generations',
     editPath: '/images/edits',
@@ -27,11 +27,15 @@ function config(overrides = {}) {
   }
 }
 
-function harness() {
+function harness({ credential = 'secret-key', legacyApiKey = '' } = {}) {
   const definitions = new Map()
   const records = new Map()
   const followups = []
   const injections = []
+  const listeners = new Map()
+  const credentialValues = new Map(credential.length > 0 ? [['OPENAI_IMAGE_API_KEY', credential]] : [])
+  let configOverride = legacyApiKey.length > 0 ? { apiKey: legacyApiKey } : {}
+  const configEntry = { id: 'dsh-openai-image-tools', options: { name: '@ayui124/dsh-openai-image-tools' } }
   const agent = {
     id: 'test',
     status: 'idle',
@@ -63,12 +67,36 @@ function harness() {
     records,
     followups,
     injections,
+    credentialValues,
+    get configOverride() { return configOverride },
+    emit(name, ...args) { for (const listener of listeners.get(name) ?? []) listener(...args) },
     agent,
     ctx: {
       tools: { register(definition) { definitions.set(definition.name, definition); return () => definitions.delete(definition.name) } },
+      on(name, listener) {
+        const list = listeners.get(name) ?? []
+        list.push(listener)
+        listeners.set(name, list)
+        return () => listeners.set(name, list.filter(value => value !== listener))
+      },
       jobs,
       agents: { get(id) { return id === agent.id ? agent : undefined } },
       logger: { warn() {} },
+      credentials: {
+        async resolve(ref) {
+          const value = credentialValues.get(ref)
+          return value === undefined ? undefined : { value, source: 'test-store' }
+        },
+        async set(ref, value) { credentialValues.set(ref, value) },
+        async unset(ref) { credentialValues.delete(ref) },
+      },
+      configEditor: {
+        configuration() { return [{ entry: configEntry, inherited: {}, override: { ...configOverride } }] },
+        async edit(entry, change) {
+          assert.equal(entry, configEntry)
+          configOverride = change({ ...configOverride }, {})
+        },
+      },
       attachments: {
         async saveImages(images) {
           return images.map((image, index) => ({
@@ -120,6 +148,35 @@ test('registers and executes text-to-image with JSON protocol', { concurrency: f
     assert.equal(captured.init.headers.Authorization, 'Bearer secret-key')
     assert.deepEqual(JSON.parse(captured.init.body), { model: 'updated-image-model', prompt: 'a blue fox', n: 1 })
     assert.equal(result.images[0].mediaType, 'image/png')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('removes a legacy plaintext key after plugin management settles', async () => {
+  const harnessState = harness({ credential: '', legacyApiKey: 'legacy-secret' })
+  apply(harnessState.ctx, config())
+  harnessState.emit('plugin-manager/changed')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(harnessState.credentialValues.get('OPENAI_IMAGE_API_KEY'), 'legacy-secret')
+  assert.equal(Object.hasOwn(harnessState.configOverride, 'apiKey'), false)
+})
+
+test('migrates a legacy plaintext API key into DSH Credentials and removes it from config', { concurrency: false }, async () => {
+  const harnessState = harness({ credential: '', legacyApiKey: 'legacy-secret' })
+  const { ctx, definitions, agent, credentialValues } = harnessState
+  apply(ctx, config())
+  const originalFetch = globalThis.fetch
+  let authorization
+  globalThis.fetch = async (_url, init) => {
+    authorization = init.headers.Authorization
+    return new Response(JSON.stringify({ data: [{ b64_json: encodedPng }] }), { status: 200 })
+  }
+  try {
+    await definitions.get('generate_image').execute({ prompt: 'migration check' }, execution(agent))
+    assert.equal(credentialValues.get('OPENAI_IMAGE_API_KEY'), 'legacy-secret')
+    assert.equal(Object.hasOwn(harnessState.configOverride, 'apiKey'), false)
+    assert.equal(authorization, 'Bearer legacy-secret')
   } finally {
     globalThis.fetch = originalFetch
   }

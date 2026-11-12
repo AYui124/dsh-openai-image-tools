@@ -5,12 +5,13 @@ window.__ModuleLoader__.load({
     const h = React.createElement
     const NS = 'openai-image-tools'
     const FIELDS = [
-      'baseURL', 'model', 'generationPath', 'editPath', 'responseFormat', 'imageField',
+      'baseURL', 'apiKeyEnv', 'model', 'generationPath', 'editPath', 'responseFormat', 'imageField',
       'timeoutMs', 'downloadTimeoutMs', 'allowPrivateImageUrls',
       'maxInputImageBytes', 'maxOutputImageBytes', 'maxImages',
     ]
     const defaults = {
       baseURL: 'https://api.openai.com/v1',
+      apiKeyEnv: 'OPENAI_IMAGE_API_KEY',
       model: 'gpt-image-1',
       generationPath: '/images/generations',
       editPath: '/images/edits',
@@ -27,19 +28,19 @@ window.__ModuleLoader__.load({
       en: {
         summary: 'Configure the OpenAI-compatible image endpoint, credentials, model, and safety limits.',
         loading: 'Loading image tool settings…', unavailable: 'This configuration is unavailable.', readOnly: 'This configuration is read-only.',
-        endpoint: 'API connection', limits: 'Limits and compatibility', baseURL: 'Base URL', apiKey: 'API key', apiKeyHint: 'Leave blank to keep the saved key unchanged.', clearKey: 'Clear saved API key', model: 'Default model', generationPath: 'Generation path', editPath: 'Edit path', responseFormat: 'Response format', imageField: 'Edit image field', timeoutMs: 'Request timeout (ms)', downloadTimeoutMs: 'URL download timeout (ms)', maxInputImageBytes: 'Maximum input bytes per image', maxOutputImageBytes: 'Maximum output bytes per image', maxImages: 'Maximum images per call', allowPrivateImageUrls: 'Allow localhost/private image URLs', privateHint: 'Enable only for a trusted local service.', save: 'Save settings', saving: 'Saving…', saved: 'Settings saved.', refused: 'The Host refused this change. Refresh and try again.', failed: 'Could not save: {message}', reset: 'Restore defaults', resetConfirm: 'Restore all non-secret fields to their composed defaults?',
+        endpoint: 'API connection', limits: 'Limits and compatibility', baseURL: 'Base URL', apiKeyEnv: 'Credential reference', apiKeyEnvHint: 'The secret is stored by DSH Credentials, never in cordis.patch.yml.', apiKey: 'API key', apiKeyHint: 'Leave blank to keep the credential unchanged.', apiKeyConfigured: 'Credential configured', apiKeyMissing: 'Credential not configured', apiKeyReadOnly: 'Credential storage is read-only.', clearKey: 'Clear saved API key', model: 'Default model', generationPath: 'Generation path', editPath: 'Edit path', responseFormat: 'Response format', imageField: 'Edit image field', timeoutMs: 'Request timeout (ms)', downloadTimeoutMs: 'URL download timeout (ms)', maxInputImageBytes: 'Maximum input bytes per image', maxOutputImageBytes: 'Maximum output bytes per image', maxImages: 'Maximum images per call', allowPrivateImageUrls: 'Allow localhost/private image URLs', privateHint: 'Enable only for a trusted local service.', save: 'Save settings', saving: 'Saving…', saved: 'Settings saved.', refused: 'The Host refused this change. Refresh and try again.', failed: 'Could not save: {message}', reset: 'Restore defaults', resetConfirm: 'Restore all non-secret fields to their composed defaults?',
       },
       zh: {
         summary: '配置 OpenAI 兼容图片接口、密钥、模型和安全限制。',
         loading: '正在加载图片工具设置…', unavailable: '此配置当前不可用。', readOnly: '此配置为只读。',
-        endpoint: 'API 连接', limits: '限制与兼容性', baseURL: '基础 URL', apiKey: 'API Key', apiKeyHint: '留空将保持已保存的密钥不变。', clearKey: '清除已保存的 API Key', model: '默认模型', generationPath: '文生图路径', editPath: '图生图路径', responseFormat: '响应格式', imageField: '图生图图片字段', timeoutMs: '请求超时（毫秒）', downloadTimeoutMs: '图片 URL 下载超时（毫秒）', maxInputImageBytes: '单张输入图片最大字节数', maxOutputImageBytes: '单张输出图片最大字节数', maxImages: '单次最大图片数', allowPrivateImageUrls: '允许 localhost/私网图片 URL', privateHint: '仅应对可信本地服务启用。', save: '保存配置', saving: '保存中…', saved: '配置已保存。', refused: 'Host 拒绝了本次修改，请刷新后重试。', failed: '保存失败：{message}', reset: '恢复默认值', resetConfirm: '确定让所有非密钥字段恢复为组合默认值吗？',
+        endpoint: 'API 连接', limits: '限制与兼容性', baseURL: '基础 URL', apiKeyEnv: '凭据引用', apiKeyEnvHint: '密钥由 DSH Credentials 保存，绝不会写入 cordis.patch.yml。', apiKey: 'API Key', apiKeyHint: '留空将保持 Credentials 中的密钥不变。', apiKeyConfigured: '凭据已配置', apiKeyMissing: '凭据未配置', apiKeyReadOnly: '凭据存储为只读。', clearKey: '清除已保存的 API Key', model: '默认模型', generationPath: '文生图路径', editPath: '图生图路径', responseFormat: '响应格式', imageField: '图生图图片字段', timeoutMs: '请求超时（毫秒）', downloadTimeoutMs: '图片 URL 下载超时（毫秒）', maxInputImageBytes: '单张输入图片最大字节数', maxOutputImageBytes: '单张输出图片最大字节数', maxImages: '单次最大图片数', allowPrivateImageUrls: '允许 localhost/私网图片 URL', privateHint: '仅应对可信本地服务启用。', save: '保存配置', saving: '保存中…', saved: '配置已保存。', refused: 'Host 拒绝了本次修改，请刷新后重试。', failed: '保存失败：{message}', reset: '恢复默认值', resetConfirm: '确定让所有非密钥字段恢复为组合默认值吗？',
       },
     }
 
-    function TextField({ label, name, value, onChange, type = 'text', hint }) {
+    function TextField({ label, name, value, onChange, type = 'text', hint, disabled = false }) {
       return h('label', { className: 'oit-field' },
         h('span', { className: 'oit-label' }, label),
-        h('input', { className: 'oit-input', name, type, value, onChange: event => onChange(event.target.value), autoComplete: type === 'password' ? 'new-password' : 'off' }),
+        h('input', { className: 'oit-input', name, type, value, disabled, onChange: event => onChange(event.target.value), autoComplete: type === 'password' ? 'new-password' : 'off' }),
         hint ? h('span', { className: 'oit-hint' }, hint) : null,
       )
     }
@@ -55,19 +56,41 @@ window.__ModuleLoader__.load({
 
     const acceptedValues = value => Object.fromEntries(FIELDS.map(field => [field, value?.[field] ?? defaults[field]]))
 
-    function ImageToolsConfigPage({ form, t }) {
+    function ImageToolsConfigPage({ ctx, form, t }) {
       const revision = form.state.revision
       const accepted = acceptedValues(form.state.value)
       const [draft, setDraft] = React.useState(accepted)
       const [apiKey, setApiKey] = React.useState('')
       const [clearKey, setClearKey] = React.useState(false)
+      const [credential, setCredential] = React.useState({ configured: false, writable: true, source: '' })
       const [status, setStatus] = React.useState(null)
       const [saving, setSaving] = React.useState(false)
+      const credentialRef = draft.apiKeyEnv.trim() || defaults.apiKeyEnv
+      const refreshCredential = React.useCallback(async ref => {
+        const response = await ctx.remote.credentials.describe([ref])
+        if (!response.ok || ref !== (draft.apiKeyEnv.trim() || defaults.apiKeyEnv)) return
+        const info = response.value[ref]
+        setCredential({ configured: info?.configured ?? false, writable: info?.writable ?? true, source: info?.source ?? '' })
+      }, [ctx, draft.apiKeyEnv])
       React.useEffect(() => {
         setDraft(acceptedValues(form.state.value))
         setApiKey('')
         setClearKey(false)
       }, [revision])
+      React.useEffect(() => {
+        let active = true
+        const ref = credentialRef
+        const read = () => ctx.remote.credentials.describe([ref]).then(response => {
+          if (!active || !response.ok) return
+          const info = response.value[ref]
+          setCredential({ configured: info?.configured ?? false, writable: info?.writable ?? true, source: info?.source ?? '' })
+        })
+        read()
+        const off = ctx.remote.$on('credentials/reference-updated', changed => {
+          if (changed === ref) read()
+        })
+        return () => { active = false; off() }
+      }, [ctx, credentialRef, revision])
       const set = (field, value) => setDraft(current => ({ ...current, [field]: value }))
       const save = async event => {
         event.preventDefault()
@@ -75,12 +98,18 @@ window.__ModuleLoader__.load({
         setSaving(true)
         setStatus(null)
         const ops = FIELDS.filter(field => draft[field] !== accepted[field]).map(field => ({ op: 'set', path: [field], value: draft[field] }))
-        if (clearKey) ops.push({ op: 'unset', path: ['apiKey'] })
-        else if (apiKey.length > 0) ops.push({ op: 'set', path: ['apiKey'], value: apiKey })
         try {
           const ok = ops.length === 0 || await form.mutate(ops, revision)
-          setStatus({ ok, text: ok ? t('saved') : t('refused') })
-          if (ok) { setApiKey(''); setClearKey(false) }
+          if (!ok) {
+            setStatus({ ok: false, text: t('refused') })
+            return
+          }
+          if (clearKey) await ctx.remote.credentials.unset(credentialRef)
+          else if (apiKey.trim().length > 0) await ctx.remote.credentials.set(credentialRef, apiKey.trim())
+          await refreshCredential(credentialRef)
+          setStatus({ ok: true, text: t('saved') })
+          setApiKey('')
+          setClearKey(false)
         } catch (error) {
           setStatus({ ok: false, text: t('failed', { message: error instanceof Error ? error.message : String(error) }) })
         } finally {
@@ -92,7 +121,9 @@ window.__ModuleLoader__.load({
         setSaving(true)
         setStatus(null)
         try {
-          const ok = await form.mutate([...FIELDS, 'apiKey'].map(field => ({ op: 'unset', path: [field] })), revision)
+          const ok = await form.mutate(FIELDS.map(field => ({ op: 'unset', path: [field] })), revision)
+          setApiKey('')
+          setClearKey(false)
           setStatus({ ok, text: ok ? t('saved') : t('refused') })
         } catch (error) {
           setStatus({ ok: false, text: t('failed', { message: error instanceof Error ? error.message : String(error) }) })
@@ -116,10 +147,11 @@ window.__ModuleLoader__.load({
             h('h4', null, t('endpoint')),
             h('div', { className: 'oit-wide' }, h(TextField, { label: t('baseURL'), name: 'baseURL', value: draft.baseURL, onChange: value => set('baseURL', value) })),
             h(TextField, { label: t('model'), name: 'model', value: draft.model, onChange: value => set('model', value) }),
-            h(TextField, { label: t('apiKey'), name: 'apiKey', type: 'password', value: apiKey, onChange: value => { setApiKey(value); setClearKey(false) }, hint: t('apiKeyHint') }),
+            h(TextField, { label: t('apiKeyEnv'), name: 'apiKeyEnv', value: draft.apiKeyEnv, onChange: value => set('apiKeyEnv', value), hint: t('apiKeyEnvHint') }),
+            h(TextField, { label: t('apiKey'), name: 'apiKey', type: 'password', value: apiKey, disabled: !credential.writable, onChange: value => { setApiKey(value); setClearKey(false) }, hint: `${t('apiKeyHint')} ${credential.configured ? t('apiKeyConfigured') : t('apiKeyMissing')}${credential.source ? ` (${credential.source})` : ''}` }),
             h(TextField, { label: t('generationPath'), name: 'generationPath', value: draft.generationPath, onChange: value => set('generationPath', value) }),
             h(TextField, { label: t('editPath'), name: 'editPath', value: draft.editPath, onChange: value => set('editPath', value) }),
-            h('label', { className: 'oit-check oit-wide' }, h('input', { type: 'checkbox', checked: clearKey, onChange: event => { setClearKey(event.target.checked); if (event.target.checked) setApiKey('') } }), h('span', null, t('clearKey'))),
+            h('label', { className: 'oit-check oit-wide' }, h('input', { type: 'checkbox', checked: clearKey, disabled: !credential.writable, onChange: event => { setClearKey(event.target.checked); if (event.target.checked) setApiKey('') } }), h('span', null, t('clearKey'), !credential.writable ? h('span', { className: 'oit-hint', style: { display: 'block' } }, t('apiKeyReadOnly')) : null)),
           ),
           h('section', { className: 'oit-group' },
             h('h4', null, t('limits')),
@@ -133,29 +165,29 @@ window.__ModuleLoader__.load({
           !form.state.writable ? h('p', { className: 'oit-status oit-error', role: 'status' }, t('readOnly')) : null,
           status ? h('p', { className: `oit-status${status.ok ? '' : ' oit-error'}`, role: 'status' }, status.text) : null,
           h('div', { className: 'oit-actions' },
-            h('button', { className: 'oit-button oit-button-primary', type: 'submit', disabled: saving || !form.state.writable }, saving ? t('saving') : t('save')),
+            h('button', { className: 'oit-button oit-button-primary', type: 'submit', disabled: saving || !form.state.writable || ((clearKey || apiKey.trim().length > 0) && !credential.writable) }, saving ? t('saving') : t('save')),
             h('button', { className: 'oit-button', type: 'button', disabled: saving || !form.state.writable, onClick: reset }, t('reset')),
           ),
         ),
       )
     }
 
-    function ImageToolsConfig({ view, form, t }) {
+    function ImageToolsConfig({ ctx, view, form, t }) {
       if (view === 'summary') return h('span', null, t('summary'))
       if (!form || form.state.status === 'loading') return h('p', { role: 'status' }, t('loading'))
       if (form.state.status !== 'ready' || !form.state.value) return h('p', { role: 'status' }, t('unavailable'))
-      return h(ImageToolsConfigPage, { form, t })
+      return h(ImageToolsConfigPage, { ctx, form, t })
     }
 
     return {
-      inject: ['slots', 'locale'],
+      inject: ['slots', 'locale', 'remote', 'remote.credentials'],
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(NS, dictionaries))
         ctx.slots.inject('plugins.row.config', () => ctx.slots.register({
           name: 'plugins.row.config',
           key: '@ayui124/dsh-openai-image-tools#dsh-openai-image-tools',
           locale: NS,
-        }, ImageToolsConfig))
+        }, props => h(ImageToolsConfig, { ...props, ctx })))
       },
     }
   },

@@ -4,7 +4,7 @@ import { basename } from 'node:path'
 import { endpointURL, optionalImageFields, parseImageAPIResponse, sniffImageMediaType } from './api.js'
 
 export const name = 'openai-image-tools'
-export const inject = ['tools', 'attachments', 'fs', 'workingDirectory', 'jobs', 'agents']
+export const inject = ['tools', 'attachments', 'fs', 'workingDirectory', 'jobs', 'agents', 'credentials', 'configEditor']
 
 const MAX_TIMER_MS = 2_147_483_647
 const enumSchema = values => z.union(values.map(value => z.const(value)))
@@ -16,10 +16,63 @@ const deepFreeze = value => {
   return value
 }
 const createUserMessage = input => deepFreeze(structuredClone({ ...input, role: 'user', id: randomUUID() }))
+const PACKAGE_NAME = '@ayui124/dsh-openai-image-tools'
+const ENTRY_ID = 'dsh-openai-image-tools'
+const DEFAULT_API_KEY_REF = 'OPENAI_IMAGE_API_KEY'
+
+function ownConfiguration(ctx) {
+  return ctx.configEditor.configuration().find(({ entry }) => entry.id === ENTRY_ID || entry.options.name === PACKAGE_NAME)
+}
+
+function legacyApiKey(ctx) {
+  const value = ownConfiguration(ctx)?.override.apiKey
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : ''
+}
+
+async function removeLegacyApiKey(ctx) {
+  const own = ownConfiguration(ctx)
+  if (own === undefined) return
+  await ctx.configEditor.edit(own.entry, current => {
+    const next = { ...current }
+    delete next.apiKey
+    return next
+  })
+}
+
+function createCredentialMigration(ctx, config, value, logger) {
+  const seed = value.length === 0
+    ? Promise.resolve(true)
+    : ctx.credentials.set(resolveConfig(config).apiKeyEnv, value).then(() => true, error => {
+      logger?.warn?.(`failed to migrate legacy API key into DSH Credentials: ${errorText(error)}`)
+      return false
+    })
+  let cleanup
+  return () => {
+    if (cleanup !== undefined) return cleanup
+    cleanup = seed.then(async seeded => {
+      if (!seeded || value.length === 0) return seeded
+      try {
+        await removeLegacyApiKey(ctx)
+        return true
+      } catch (error) {
+        logger?.warn?.(`failed to remove legacy API key from plugin config: ${errorText(error)}`)
+        return false
+      }
+    })
+    return cleanup
+  }
+}
+
+async function requestConfig(ctx, config, migrate, legacyValue) {
+  const migrated = await migrate()
+  const resolved = resolveConfig(config)
+  const credential = await ctx.credentials.resolve(resolved.apiKeyEnv)
+  return { ...resolved, apiKey: credential?.value ?? (migrated ? '' : legacyValue) }
+}
 
 export const Config = z.object({
   baseURL: z.string().default('https://api.openai.com/v1').volatile().description('OpenAI-compatible API root URL, not a complete image endpoint.'),
-  apiKey: z.string().role('secret').volatile().description('Bearer API key. Leave empty for a trusted local compatible service.'),
+  apiKeyEnv: z.string().default('OPENAI_IMAGE_API_KEY').volatile().description('Credential reference resolved through the DSH Credentials service. The secret value is never stored in plugin config.'),
   model: z.string().default('gpt-image-1').volatile().description('Default image model; each tool call may override it.'),
   generationPath: z.string().default('/images/generations').volatile().description('Text-to-image endpoint path relative to baseURL.'),
   editPath: z.string().default('/images/edits').volatile().description('Image edit endpoint path relative to baseURL.'),
@@ -185,7 +238,7 @@ function setResponseFormat(config, target) {
   else target.response_format = config.responseFormat
 }
 
-function registerGenerateTool(ctx, config) {
+function registerGenerateTool(ctx, config, migration, legacyValue) {
   ctx.tools.register({
     name: 'generate_image',
     description: 'Generate images from a text prompt through the configured OpenAI-compatible Images API. The generated images are returned as durable image attachments.',
@@ -203,16 +256,17 @@ function registerGenerateTool(ctx, config) {
     timeoutMs: config.timeoutMs,
     isConcurrencySafe: () => true,
     async execute(args, exec) {
-      assertCommonArgs(args, config)
-      const body = { model: args.model?.trim() || config.model, prompt: args.prompt, ...optionalImageFields(args) }
-      setResponseFormat(config, body)
-      const response = await fetch(endpointURL(config.baseURL, config.generationPath), {
+      const snapshot = await requestConfig(ctx, config, migration, legacyValue)
+      assertCommonArgs(args, snapshot)
+      const body = { model: args.model?.trim() || snapshot.model, prompt: args.prompt, ...optionalImageFields(args) }
+      setResponseFormat(snapshot, body)
+      const response = await fetch(endpointURL(snapshot.baseURL, snapshot.generationPath), {
         method: 'POST',
-        headers: requestHeaders(config, true),
+        headers: requestHeaders(snapshot, true),
         body: JSON.stringify(body),
-        signal: requestSignal(exec.signal, config.timeoutMs),
+        signal: requestSignal(exec.signal, snapshot.timeoutMs),
       })
-      return parseAndSave(ctx, response, config, exec.signal)
+      return parseAndSave(ctx, response, snapshot, exec.signal)
     },
     presentCall(args) {
       return { card: 'generic', title: `Generate image: ${args.prompt}`, kind: 'other', rawInput: args }
@@ -220,7 +274,7 @@ function registerGenerateTool(ctx, config) {
   })
 }
 
-function registerEditTool(ctx, config) {
+function registerEditTool(ctx, config, migration, legacyValue) {
   ctx.tools.register({
     name: 'edit_image',
     description: 'Create or edit an image from one or more workspace image files through the configured OpenAI-compatible Images Edit API. Use image_paths in reference order; an optional PNG mask controls the editable area.',
@@ -247,25 +301,26 @@ function registerEditTool(ctx, config) {
     timeoutMs: config.timeoutMs,
     isConcurrencySafe: () => true,
     async execute(args, exec) {
-      assertCommonArgs(args, config)
-      if (!Array.isArray(args.image_paths) || args.image_paths.length < 1 || args.image_paths.length > config.maxImages) throw new Error(`image_paths must contain from 1 to ${config.maxImages} paths`)
+      const snapshot = await requestConfig(ctx, config, migration, legacyValue)
+      assertCommonArgs(args, snapshot)
+      if (!Array.isArray(args.image_paths) || args.image_paths.length < 1 || args.image_paths.length > snapshot.maxImages) throw new Error(`image_paths must contain from 1 to ${snapshot.maxImages} paths`)
       const images = []
-      for (const path of args.image_paths) images.push(await loadWorkspaceImage(ctx, path, exec, config.maxInputImageBytes))
-      const mask = args.mask_path === undefined ? undefined : await loadWorkspaceImage(ctx, args.mask_path, exec, config.maxInputImageBytes, true)
+      for (const path of args.image_paths) images.push(await loadWorkspaceImage(ctx, path, exec, snapshot.maxInputImageBytes))
+      const mask = args.mask_path === undefined ? undefined : await loadWorkspaceImage(ctx, args.mask_path, exec, snapshot.maxInputImageBytes, true)
       const form = new FormData()
-      form.set('model', args.model?.trim() || config.model)
+      form.set('model', args.model?.trim() || snapshot.model)
       form.set('prompt', args.prompt)
       for (const [key, value] of Object.entries(optionalImageFields(args))) form.set(key, String(value))
-      setResponseFormat(config, form)
-      for (const image of images) form.append(config.imageField, new Blob([image.data], { type: image.mediaType }), image.filename)
+      setResponseFormat(snapshot, form)
+      for (const image of images) form.append(snapshot.imageField, new Blob([image.data], { type: image.mediaType }), image.filename)
       if (mask !== undefined) form.set('mask', new Blob([mask.data], { type: mask.mediaType }), mask.filename)
-      const response = await fetch(endpointURL(config.baseURL, config.editPath), {
+      const response = await fetch(endpointURL(snapshot.baseURL, snapshot.editPath), {
         method: 'POST',
-        headers: requestHeaders(config, false),
+        headers: requestHeaders(snapshot, false),
         body: form,
-        signal: requestSignal(exec.signal, config.timeoutMs),
+        signal: requestSignal(exec.signal, snapshot.timeoutMs),
       })
-      return parseAndSave(ctx, response, config, exec.signal)
+      return parseAndSave(ctx, response, snapshot, exec.signal)
     },
     presentCall(args) {
       return { card: 'generic', title: `Edit image: ${args.prompt}`, kind: 'other', rawInput: { prompt: args.prompt, image_paths: args.image_paths, mask_path: args.mask_path } }
@@ -347,7 +402,7 @@ function startBackgroundImageJob(ctx, exec, label, operation) {
   return { job_id: jobId, status: 'running' }
 }
 
-function registerAsyncGenerateTool(ctx, config) {
+function registerAsyncGenerateTool(ctx, config, migration, legacyValue) {
   ctx.tools.register({
     name: 'generate_image_async',
     description: 'Start text-to-image generation as a background job and return immediately. The completed images are appended to the originating conversation. Use job_list, job_output, or job_kill with the returned job id when needed.',
@@ -365,7 +420,7 @@ function registerAsyncGenerateTool(ctx, config) {
     isConcurrencySafe: () => true,
     timeoutMs: 30_000,
     async execute(args, exec) {
-      const snapshot = resolveConfig(config)
+      const snapshot = await requestConfig(ctx, config, migration, legacyValue)
       assertCommonArgs(args, snapshot)
       const body = { model: args.model?.trim() || snapshot.model, prompt: args.prompt, ...optionalImageFields(args) }
       setResponseFormat(snapshot, body)
@@ -386,7 +441,7 @@ function registerAsyncGenerateTool(ctx, config) {
   })
 }
 
-function registerAsyncEditTool(ctx, config) {
+function registerAsyncEditTool(ctx, config, migration, legacyValue) {
   ctx.tools.register({
     name: 'edit_image_async',
     description: 'Start an image edit from workspace files as a background job and return immediately. The completed images are appended to the originating conversation. Use job_list, job_output, or job_kill with the returned job id when needed.',
@@ -413,7 +468,7 @@ function registerAsyncEditTool(ctx, config) {
     isConcurrencySafe: () => true,
     timeoutMs: 30_000,
     async execute(args, exec) {
-      const snapshot = resolveConfig(config)
+      const snapshot = await requestConfig(ctx, config, migration, legacyValue)
       assertCommonArgs(args, snapshot)
       if (!Array.isArray(args.image_paths) || args.image_paths.length < 1 || args.image_paths.length > snapshot.maxImages) throw new Error(`image_paths must contain from 1 to ${snapshot.maxImages} paths`)
       const images = []
@@ -448,7 +503,7 @@ function resolveConfig(config) {
   const text = (value, fallback) => typeof value === 'string' && value.trim().length > 0 ? value.trim() : fallback
   const integer = (value, fallback, max = Number.MAX_SAFE_INTEGER) => Number.isInteger(value) && value >= 1 && value <= max ? value : fallback
   const baseURL = read(config.baseURL)
-  const apiKey = read(config.apiKey)
+  const apiKeyEnv = read(config.apiKeyEnv)
   const model = read(config.model)
   const generationPath = read(config.generationPath)
   const editPath = read(config.editPath)
@@ -462,7 +517,7 @@ function resolveConfig(config) {
   const maxImages = read(config.maxImages)
   return {
     baseURL: text(baseURL, 'https://api.openai.com/v1'),
-    apiKey: typeof apiKey === 'string' ? apiKey : '',
+    apiKeyEnv: text(apiKeyEnv, DEFAULT_API_KEY_REF),
     model: text(model, 'gpt-image-1'),
     generationPath: text(generationPath, '/images/generations'),
     editPath: text(editPath, '/images/edits'),
@@ -483,8 +538,12 @@ export function apply(ctx, config) {
       return resolveConfig(config)[property]
     },
   })
-  registerGenerateTool(ctx, current)
-  registerEditTool(ctx, current)
-  registerAsyncGenerateTool(ctx, current)
-  registerAsyncEditTool(ctx, current)
+  const legacyValue = legacyApiKey(ctx)
+  const logger = typeof ctx.logger === 'function' ? ctx.logger(name) : ctx.logger
+  const migrate = createCredentialMigration(ctx, current, legacyValue, logger)
+  ctx.on('plugin-manager/changed', () => { void migrate() })
+  registerGenerateTool(ctx, current, migrate, legacyValue)
+  registerEditTool(ctx, current, migrate, legacyValue)
+  registerAsyncGenerateTool(ctx, current, migrate, legacyValue)
+  registerAsyncEditTool(ctx, current, migrate, legacyValue)
 }

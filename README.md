@@ -16,13 +16,18 @@
 插件安装后，在主界面的“插件 → 已安装”中打开本插件，再点击 `dsh-openai-image-tools` 行的“配置”进入参数表单：
 
 - `baseURL`：默认 `https://api.openai.com/v1`
-- `apiKey`：Bearer API Key（Secret 字段；可信本地服务可留空）
+- `apiKeyEnv`：DSH Credentials 引用，默认 `OPENAI_IMAGE_API_KEY`
+- API Key：通过配置界面直接写入 DSH Credentials，不会保存到 `cordis.patch.yml`；可信本地服务可留空
 - `model`：默认 `gpt-image-1`
 - `generationPath` / `editPath`：兼容服务的端点路径
 - `responseFormat`：`auto`、`b64_json` 或 `url`
 - `imageField`：图生图 multipart 图片字段 `image` 或 `image[]`
 - 请求超时、下载超时、输入/输出大小和图片数量上限
 - `allowPrivateImageUrls`：仅在可信本地服务返回私网图片 URL 时启用
+
+## 密钥安全与迁移
+
+从 `1.2.0` 起，插件配置只保存非敏感的 CredentialRef。Host 在每次图片请求前通过 DSH Credentials 解析实际密钥，配置界面只能读取“已配置/未配置”状态，不能读取密钥内容。升级时若旧配置中存在明文 `apiKey`，插件会先写入 Credentials，再从 Profile 配置中删除旧字段。
 
 ## 兼容范围
 
@@ -39,7 +44,7 @@
 - Workflow 文件：`publish.yml`
 - Environment：留空
 
-创建并发布 GitHub Release 时，Release Tag 必须与 `package.json` 版本一致，例如 `v1.1.2`。工作流会验证版本、安装依赖、运行检查与测试，然后将 scoped package 公开发布到 npm。
+创建并发布 GitHub Release 时，Release Tag 必须与 `package.json` 版本一致，例如 `v1.2.0`。工作流会验证版本、安装依赖、运行检查与测试，然后将 scoped package 公开发布到 npm。
 
 ## License
 
